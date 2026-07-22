@@ -45,6 +45,12 @@ export interface ZiplineProps {
   reticle?: boolean
   /** 内蔵のタップ/クリック発射を使うか。既定 true（false にして ref.zipToAim を自前トリガーへ） */
   tapToZip?: boolean
+  /**
+   * 目線の高さ(m)。XRift の `useTeleport` はプレイヤーの**足元**を置き、カメラはそこから
+   * この分だけ上にある。対象に**目線が合う**よう着地の足元を下げる補正に使う。既定 1.44
+   * （XRift 既定＝PLAYER_HALF_HEIGHT 0.4 + PLAYER_RADIUS 0.4 + CAMERA_Y_OFFSET 0.64）。
+   */
+  eyeHeight?: number
   /** 全体の有効/無効。既定 true */
   enabled?: boolean
 }
@@ -60,6 +66,7 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
     reticleColor = '#43e0ff',
     reticle = true,
     tapToZip = true,
+    eyeHeight = 1.44,
     enabled = true,
   },
   ref,
@@ -80,9 +87,14 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
   const doZip = (): boolean => {
     const i = aim.current
     if (!enabled || i < 0 || glide.current || !teleport) return false
-    const start = camera.getWorldPosition(new Vector3())
-    const dir = targets[i].clone().sub(start).normalize()
+    const eye = camera.getWorldPosition(new Vector3())
+    const dir = targets[i].clone().sub(eye).normalize()
+    // teleport は足元を置く＝カメラは eyeHeight 上。目線が対象を向くよう足元を eyeHeight 下げる
+    // （start/end とも足元空間へ揃える＝発射時の縦跳ねも消える）
+    const start = eye.clone()
+    start.y -= eyeHeight
     const end = targets[i].clone().sub(dir.multiplyScalar(standoff))
+    end.y -= eyeHeight
     glide.current = { start, end, index: i, t: 0 }
     onPick?.(i)
     return true
