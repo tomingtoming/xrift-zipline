@@ -37,8 +37,14 @@ export interface ZiplineProps {
   standoff?: number
   /** 滑走の秒数。既定 1.1 */
   duration?: number
-  /** クロスヘアの許容コーン半角(度)。既定 13 */
+  /** クロスヘアの許容コーン半角(度)。既定 13（半径ヒットが無いときの遠方選択用） */
   aimConeDeg?: number
+  /**
+   * 対象の実体半径(m)。レイがこの半径内を通る対象は「当たり」とみなし、**最寄りを優先**する
+   * （手前の物を貫通して奥を指すのを防ぐ＝遮蔽）。当たりが無ければ `aimConeDeg` の角度選択に落ちる。
+   * 対象の見た目サイズに合わせる。既定 0.9
+   */
+  targetRadius?: number
   /** 照準リングの色。既定 '#43e0ff' */
   reticleColor?: string
   /** 照準リングを描くか。既定 true（自前の照準表現を使うなら false） */
@@ -63,6 +69,7 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
     standoff = 3.2,
     duration = 1.1,
     aimConeDeg = 13,
+    targetRadius = 0.9,
     reticleColor = '#43e0ff',
     reticle = true,
     tapToZip = true,
@@ -155,21 +162,31 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
         onArrive?.(idx)
       }
     }
-    // 照準: クロスヘア(カメラ前方)に最も近い対象
+    // 照準: レイが実体半径を貫く対象は「最寄り」を優先（遮蔽＝手前の物を貫通しない）。
+    // 半径内に一つも無ければ角度コーンで遠方の対象を選ぶ（点として最も中央の物）。
     camera.getWorldPosition(camPos)
     camera.getWorldDirection(camDir)
-    let best = -1
-    let bestDot = aimCos
+    let hitBest = -1
+    let hitNearest = Infinity // 半径内ヒットのうち最寄り(along最小)
+    let angBest = -1
+    let angBestDot = aimCos
     for (let i = 0; i < targets.length; i++) {
       tmp.copy(targets[i]).sub(camPos)
-      const len = tmp.length()
-      if (len < 1) continue
-      const d = tmp.dot(camDir) / len
-      if (d > bestDot) {
-        bestDot = d
-        best = i
+      const along = tmp.dot(camDir) // レイ方向の符号付き距離
+      if (along <= 0.5) continue // 背後/近すぎ
+      const len2 = tmp.lengthSq()
+      const perp = Math.sqrt(Math.max(0, len2 - along * along)) // レイと対象点の垂直距離
+      if (perp < targetRadius && along < hitNearest) {
+        hitNearest = along
+        hitBest = i
+      }
+      const d = along / Math.sqrt(len2) // = cos(視線との角度)
+      if (d > angBestDot) {
+        angBestDot = d
+        angBest = i
       }
     }
+    const best = hitBest >= 0 ? hitBest : angBest
     aim.current = best
     const r = reticleRef.current
     if (r) {

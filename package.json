@@ -1,6 +1,6 @@
 {
   "name": "xrift-zipline",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Crosshair-aim zip-to-target navigation for react-three-fiber / WebXR worlds \u2014 look at a target, tap/trigger, glide there. Solves free navigation in zero-gravity spaces. \u898b\u305f\u5bfe\u8c61\u3078\u6ed1\u8d70\u3059\u308b\u30b8\u30c3\u30d7\u30e9\u30a4\u30f3\u79fb\u52d5",
   "type": "module",
   "main": "./lib/index.js",
