@@ -1,0 +1,67 @@
+{
+  "name": "xrift-zipline",
+  "version": "0.1.0",
+  "description": "Crosshair-aim zip-to-target navigation for react-three-fiber / WebXR worlds — look at a target, tap/trigger, glide there. Solves free navigation in zero-gravity spaces. 見た対象へ滑走するジップライン移動",
+  "type": "module",
+  "main": "./lib/index.js",
+  "module": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:lib": "vite build --config vite.lib.config.ts",
+    "build": "tsc --noEmit && vite build --config vite.lib.config.ts",
+    "prepare": "npm run build:lib"
+  },
+  "peerDependencies": {
+    "@react-three/fiber": ">=9.0.0",
+    "@xrift/world-components": "*",
+    "react": ">=19.0.0",
+    "three": ">=0.176.0"
+  },
+  "devDependencies": {
+    "@react-three/fiber": "^9.5.0",
+    "@types/react": "^19.2.14",
+    "@types/three": "^0.183.1",
+    "@vitejs/plugin-react": "^5.1.4",
+    "@xrift/world-components": "^0.41.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "three": "^0.183.1",
+    "typescript": "^5.6.2",
+    "vite": "^7.3.1",
+    "vite-plugin-dts": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": "toming (https://toming.app)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomingtoming/xrift-zipline.git"
+  },
+  "keywords": [
+    "xrift",
+    "webxr",
+    "vr",
+    "locomotion",
+    "zipline",
+    "teleport",
+    "navigation",
+    "zero-gravity",
+    "react-three-fiber",
+    "metaverse"
+  ],
+  "sideEffects": false
+}
