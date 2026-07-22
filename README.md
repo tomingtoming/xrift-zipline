@@ -37,7 +37,7 @@ function World() {
 The component renders a small billboarded reticle on the target nearest your aim ray and glides you to `standoff` metres in front of it.
 
 - **Flat (desktop/mobile)**: aim = camera forward (crosshair); fire = **tap/click** (distinguished from a look-drag).
-- **VR**: aim = the **controller pointer ray** (`targetRaySpace`, following whichever hand last pulled the trigger); fire = **trigger** (`selectstart`). Falls back to camera aim if no controller pose is available.
+- **VR**: aim = the **controller pointer ray** (`targetRaySpace`, following whichever hand last pulled the trigger); fire = **trigger** (`selectstart`). A **beam line** is drawn from the controller to the aimed target. Falls back to camera aim if no controller pose is available.
 
 ### Driving the trigger yourself (VR controller, custom button)
 
@@ -65,8 +65,9 @@ zip.current?.zipToAim()
 | `tapToZip` | `true` | use the built-in tap/click/VR-trigger firing |
 | `aimHand` | `'right'` | initial VR aim hand; follows whichever hand last pulled the trigger |
 | `eyeHeight` | `1.44` | camera height above the teleported feet position; arrival is lowered by this so the target meets your eye line |
-| `reticleColor` | `'#43e0ff'` | reticle ring colour |
+| `reticleColor` | `'#43e0ff'` | reticle ring / beam colour |
 | `reticle` | `true` | render the built-in reticle |
+| `rayLine` | `true` | render the VR beam line (controller → aimed target; 24 m forward when nothing is aimed; never drawn on flat) |
 | `enabled` | `true` | master on/off |
 
 `ZiplineHandle` (via `ref`): `getAimIndex()`, `zipToAim()`.

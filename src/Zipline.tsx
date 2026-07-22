@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { TeleportContext } from '@xrift/world-components'
-import { DoubleSide, Matrix4, Mesh, Vector3 } from 'three'
+import { DoubleSide, Matrix4, Mesh, Quaternion, Vector3 } from 'three'
 import type { WebGLRenderer } from 'three'
 
 /**
@@ -103,6 +103,11 @@ export interface ZiplineProps {
   reticleColor?: string
   /** 照準リングを描くか。既定 true（自前の照準表現を使うなら false） */
   reticle?: boolean
+  /**
+   * VRでコントローラから照準先までのビーム線を描くか。既定 true。
+   * 照準中は対象まで、非照準時は前方 24m。非VR（カメラ照準）では常に描かない。
+   */
+  rayLine?: boolean
   /** 内蔵のタップ/クリック/VRトリガー発射を使うか。既定 true（false にして ref.zipToAim を自前トリガーへ） */
   tapToZip?: boolean
   /**
@@ -131,6 +136,7 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
     targetRadius = 0.9,
     reticleColor = '#43e0ff',
     reticle = true,
+    rayLine = true,
     tapToZip = true,
     aimHand = 'right',
     eyeHeight = 1.44,
@@ -142,6 +148,7 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
   const teleportCtx = useContext(TeleportContext)
   const teleport = teleportCtx?.teleport
   const reticleRef = useRef<Mesh>(null)
+  const beamRef = useRef<Mesh>(null)
   const aim = useRef(-1)
   const glide = useRef<{ start: Vector3; end: Vector3; index: number; t: number } | null>(null)
   const activeHand = useRef<'left' | 'right'>(aimHand)
@@ -150,6 +157,8 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
   const camPos = useMemo(() => new Vector3(), [])
   const camDir = useMemo(() => new Vector3(), [])
   const tmp = useMemo(() => new Vector3(), [])
+  const beamQuat = useMemo(() => new Quaternion(), [])
+  const beamUp = useMemo(() => new Vector3(0, 1, 0), [])
   const aimCos = useMemo(() => Math.cos((aimConeDeg * Math.PI) / 180), [aimConeDeg])
 
   // 発射: 照準中の対象へ滑走を開始（最新プロップを閉じ込めるため ref 経由で公開）
@@ -257,7 +266,8 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
       }
     }
     // 照準レイ: VRはコントローラのポインターレイ（targetRaySpace）、非VR/取得不能はカメラ前方。
-    if (!readTargetRayWorld(gl, activeHand.current, camPos, camDir)) {
+    const vrRay = readTargetRayWorld(gl, activeHand.current, camPos, camDir)
+    if (!vrRay) {
       camera.getWorldPosition(camPos)
       camera.getWorldDirection(camDir)
     }
@@ -301,19 +311,47 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
         r.visible = false
       }
     }
+    // レイビーム: VR時のみ、コントローラ（レイ原点）から照準先まで描く（Y軸シリンダを回して伸ばす）
+    const b = beamRef.current
+    if (b) {
+      if (vrRay) {
+        const len = best >= 0 ? camPos.distanceTo(targets[best]) : 24
+        b.visible = true
+        b.position.copy(camPos).addScaledVector(camDir, 0.06 + len / 2)
+        b.quaternion.copy(beamQuat.setFromUnitVectors(beamUp, camDir))
+        b.scale.set(1, len, 1)
+      } else {
+        b.visible = false
+      }
+    }
   })
 
-  if (!reticle) return null
   return (
-    <mesh ref={reticleRef} visible={false} frustumCulled={false}>
-      <ringGeometry args={[0.6, 0.78, 32]} />
-      <meshBasicMaterial
-        color={reticleColor}
-        transparent
-        opacity={0.85}
-        side={DoubleSide}
-        depthTest={false}
-      />
-    </mesh>
+    <>
+      {reticle && (
+        <mesh ref={reticleRef} visible={false} frustumCulled={false}>
+          <ringGeometry args={[0.6, 0.78, 32]} />
+          <meshBasicMaterial
+            color={reticleColor}
+            transparent
+            opacity={0.85}
+            side={DoubleSide}
+            depthTest={false}
+          />
+        </mesh>
+      )}
+      {rayLine && (
+        <mesh ref={beamRef} visible={false} frustumCulled={false}>
+          <cylinderGeometry args={[0.006, 0.006, 1, 6, 1, true]} />
+          <meshBasicMaterial
+            color={reticleColor}
+            transparent
+            opacity={0.5}
+            side={DoubleSide}
+            depthTest={false}
+          />
+        </mesh>
+      )}
+    </>
   )
 })
