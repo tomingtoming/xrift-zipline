@@ -8,17 +8,71 @@ import {
 } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { TeleportContext } from '@xrift/world-components'
-import { DoubleSide, Mesh, Vector3 } from 'three'
+import { DoubleSide, Matrix4, Mesh, Vector3 } from 'three'
+import type { WebGLRenderer } from 'three'
 
 /**
- * Zipline — クロスヘア（カメラ前方）に最も近い対象を選び、タップ/クリック（または外部トリガー）で
+ * Zipline — 照準レイに最も近い対象を選び、タップ/クリック/VRトリガー（または外部トリガー）で
  * その対象の手前まで滑走する WebXR / react-three-fiber 用ナビゲーション。
  *
- * 無重力ワールドで「見ている物へ素早く行く」を、水平移動に依存せず解く（どの高さの対象にも届く）。
+ * 照準レイ: VR ではコントローラのポインターレイ（`targetRaySpace`・トリガーを押した手に追従）、
+ * 非 VR ではカメラ前方（クロスヘア）。頭の向きでなく手で狙えるのが VR の本来 UX。
+ *
+ * 無重力ワールドで「狙った物へ素早く行く」を、水平移動に依存せず解く（どの高さの対象にも届く）。
  * 移動は XRift の `useTeleport`（`TeleportContext`）に委譲＝ホストのプレイヤー制御に乗る。
  * ホスト実装が無い環境（例: DevEnvironment のデフォルト）では teleport が no-op になり得るので、
  * 実挙動は実ホストで確認する。
  */
+
+// ---- VRレイ読み取りの使い回し一時オブジェクト ----
+const _mHead = new Matrix4()
+const _mRay = new Matrix4()
+const _mRig = new Matrix4()
+const _mOut = new Matrix4()
+
+/**
+ * WebXRコントローラの targetRaySpace（ポインターレイ）のワールド姿勢を現在のXRFrameから直接読む。
+ * 座標系: レイはXR参照空間 → rig = headWorld × headLocal⁻¹ で three のワールド系へ持ち上げる
+ * （ホストがXRオリジンをアバター身長比等でscaleしていても、方向は normalize でスケールを捨てる）。
+ * 優先手のソースが無ければ他のコントローラへフォールバック。
+ * @returns 非presenting・XRFrame/参照空間なし・入力ソースなし・pose解決不能で false（out未変更）
+ */
+function readTargetRayWorld(
+  gl: WebGLRenderer,
+  hand: 'left' | 'right',
+  outPos: Vector3,
+  outDir: Vector3,
+): boolean {
+  const xr = gl.xr
+  if (!xr.isPresenting) return false
+  const session = xr.getSession()
+  const frame = xr.getFrame()
+  const refSpace = xr.getReferenceSpace()
+  if (!session || !frame || !refSpace) return false
+  const viewerPose = frame.getViewerPose(refSpace)
+  if (!viewerPose) return false
+  let src: XRInputSource | null = null
+  for (const s of session.inputSources) {
+    if (!s.targetRaySpace) continue
+    if (s.handedness === hand) {
+      src = s
+      break
+    }
+    if (!src) src = s
+  }
+  if (!src) return false
+  const pose = frame.getPose(src.targetRaySpace, refSpace)
+  if (!pose) return false
+  _mHead.fromArray(Array.from(viewerPose.transform.matrix))
+  _mRay.fromArray(Array.from(pose.transform.matrix))
+  // three側のXRカメラのmatrixWorldは頭のワールド姿勢（rig合成済み）
+  _mRig.copy(xr.getCamera().matrixWorld).multiply(_mHead.invert())
+  _mOut.copy(_mRig).multiply(_mRay)
+  outPos.setFromMatrixPosition(_mOut)
+  const e = _mOut.elements
+  outDir.set(-e[8], -e[9], -e[10]).normalize() // targetRay は -Z 方向
+  return true
+}
 export interface ZiplineHandle {
   /** 現在照準に捉えている対象の index（無ければ -1） */
   getAimIndex: () => number
@@ -49,8 +103,13 @@ export interface ZiplineProps {
   reticleColor?: string
   /** 照準リングを描くか。既定 true（自前の照準表現を使うなら false） */
   reticle?: boolean
-  /** 内蔵のタップ/クリック発射を使うか。既定 true（false にして ref.zipToAim を自前トリガーへ） */
+  /** 内蔵のタップ/クリック/VRトリガー発射を使うか。既定 true（false にして ref.zipToAim を自前トリガーへ） */
   tapToZip?: boolean
+  /**
+   * VRで照準に使う手の初期値。既定 'right'。以後はトリガー（select）を押した手に自動追従する
+   * （tapToZip:false でも追従だけは行う＝自前トリガーでも照準は最後に使った手のレイ）。
+   */
+  aimHand?: 'left' | 'right'
   /**
    * 目線の高さ(m)。XRift の `useTeleport` はプレイヤーの**足元**を置き、カメラはそこから
    * この分だけ上にある。対象に**目線が合う**よう着地の足元を下げる補正に使う。既定 1.44
@@ -73,17 +132,20 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
     reticleColor = '#43e0ff',
     reticle = true,
     tapToZip = true,
+    aimHand = 'right',
     eyeHeight = 1.44,
     enabled = true,
   },
   ref,
 ) {
-  const { camera } = useThree()
+  const { camera, gl } = useThree()
   const teleportCtx = useContext(TeleportContext)
   const teleport = teleportCtx?.teleport
   const reticleRef = useRef<Mesh>(null)
   const aim = useRef(-1)
   const glide = useRef<{ start: Vector3; end: Vector3; index: number; t: number } | null>(null)
+  const activeHand = useRef<'left' | 'right'>(aimHand)
+  const pendingZip = useRef(false)
 
   const camPos = useMemo(() => new Vector3(), [])
   const camDir = useMemo(() => new Vector3(), [])
@@ -94,6 +156,7 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
   const doZip = (): boolean => {
     const i = aim.current
     if (!enabled || i < 0 || glide.current || !teleport) return false
+    // 滑走の起点/終点は常にカメラ（頭）基準＝コントローラで狙っても到着時に対象が顔の正面に来る
     const eye = camera.getWorldPosition(new Vector3())
     const dir = targets[i].clone().sub(eye).normalize()
     // teleport は足元を置く＝カメラは eyeHeight 上。目線が対象を向くよう足元を eyeHeight 下げる
@@ -147,6 +210,37 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
     }
   }, [tapToZip])
 
+  // VRトリガー: XRセッションの selectstart。押した手を照準の手にし、発射は次フレームの
+  // 照準更新後（pendingZip）＝手を切り替えた直後でも前の手のレイで選んだ対象へ飛ばない。
+  // tapToZip:false でも手の追従だけは行う（自前トリガー運用でも照準は最後に使った手）。
+  useEffect(() => {
+    const onSelectStart = (e: XRInputSourceEvent) => {
+      const h = e.inputSource.handedness
+      if (h === 'left' || h === 'right') activeHand.current = h
+      if (tapToZip) pendingZip.current = true
+    }
+    let bound: XRSession | null = null
+    const bind = () => {
+      const session = gl.xr.getSession()
+      if (!session || session === bound) return
+      bound = session
+      session.addEventListener('selectstart', onSelectStart)
+    }
+    const unbind = () => {
+      bound?.removeEventListener('selectstart', onSelectStart)
+      bound = null
+      pendingZip.current = false
+    }
+    gl.xr.addEventListener('sessionstart', bind)
+    gl.xr.addEventListener('sessionend', unbind)
+    bind()
+    return () => {
+      gl.xr.removeEventListener('sessionstart', bind)
+      gl.xr.removeEventListener('sessionend', unbind)
+      unbind()
+    }
+  }, [gl, tapToZip])
+
   useFrame((_s, delta) => {
     if (!enabled) return
     // 滑走駆動（毎フレーム teleport で end へ寄せる）
@@ -162,10 +256,13 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
         onArrive?.(idx)
       }
     }
+    // 照準レイ: VRはコントローラのポインターレイ（targetRaySpace）、非VR/取得不能はカメラ前方。
+    if (!readTargetRayWorld(gl, activeHand.current, camPos, camDir)) {
+      camera.getWorldPosition(camPos)
+      camera.getWorldDirection(camDir)
+    }
     // 照準: レイが実体半径を貫く対象は「最寄り」を優先（遮蔽＝手前の物を貫通しない）。
     // 半径内に一つも無ければ角度コーンで遠方の対象を選ぶ（点として最も中央の物）。
-    camera.getWorldPosition(camPos)
-    camera.getWorldDirection(camDir)
     let hitBest = -1
     let hitNearest = Infinity // 半径内ヒットのうち最寄り(along最小)
     let angBest = -1
@@ -188,6 +285,11 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
     }
     const best = hitBest >= 0 ? hitBest : angBest
     aim.current = best
+    // VRトリガーの発射（照準を更新してから＝押した手のレイで選び直した対象へ飛ぶ）
+    if (pendingZip.current) {
+      pendingZip.current = false
+      zipRef.current()
+    }
     const r = reticleRef.current
     if (r) {
       if (best >= 0) {
