@@ -157,6 +157,7 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
   const camPos = useMemo(() => new Vector3(), [])
   const camDir = useMemo(() => new Vector3(), [])
   const tmp = useMemo(() => new Vector3(), [])
+  const headPos = useMemo(() => new Vector3(), [])
   const beamQuat = useMemo(() => new Quaternion(), [])
   const beamUp = useMemo(() => new Vector3(0, 1, 0), [])
   const aimCos = useMemo(() => Math.cos((aimConeDeg * Math.PI) / 180), [aimConeDeg])
@@ -305,7 +306,10 @@ export const Zipline = forwardRef<ZiplineHandle, ZiplineProps>(function Zipline(
       if (best >= 0) {
         r.visible = true
         r.position.copy(targets[best])
-        r.quaternion.copy(camera.quaternion)
+        // 頭のワールド座標へ lookAt（ワールド空間演算＝親やホストのリグ構成に依らない）。
+        // camera.quaternion のコピーはローカル回転＝VRホストがカメラをリグ下に置くため、
+        // スティックターン/スポーン向きのヨー（リグ側が保持）が乗らずワールド固定に見える
+        r.lookAt(camera.getWorldPosition(headPos))
         r.scale.setScalar(Math.max(0.4, camPos.distanceTo(targets[best]) * 0.06))
       } else {
         r.visible = false
